@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-func SendVerificationEmail(toEmail string, token string) error {
+func SendVerificationEmail(toEmail string, code string) error {
 	from := os.Getenv("NODEMAILER_EMAIL")
 	password := os.Getenv("NODEMAILER_PASSWORD")
 
@@ -22,24 +22,19 @@ func SendVerificationEmail(toEmail string, token string) error {
 	// Set up authentication information.
 	auth := smtp.PlainAuth("", from, password, smtpHost)
 
-	// Verification Link
-	// Assuming frontend will handle /verify?token=... or point to backend directly
-	// We'll point directly to backend for simplicity: GET /api/auth/verify?token=
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8002"
-	}
-	verificationLink := fmt.Sprintf("http://localhost:%s/api/auth/verify?token=%s", port, token)
-
 	// Build the email message
-	subject := "Subject: Verify your AI Assistant Account\n"
+	subject := "Subject: Your Verification Code\n"
 	mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n"
 	body := fmt.Sprintf(`
-		<h2>Welcome to AI PDF Assistant!</h2>
-		<p>Thank you for signing up. Please verify your email address by clicking the link below:</p>
-		<p><a href="%s" style="display:inline-block;padding:10px 20px;color:white;background-color:#2563eb;text-decoration:none;border-radius:5px;">Verify Email</a></p>
-		<p>Or paste this link in your browser: %s</p>
-	`, verificationLink, verificationLink)
+		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+			<h2 style="color: #333;">Welcome to AI PDF Assistant!</h2>
+			<p>Thank you for signing up. Please verify your email address by entering the following 6-digit code:</p>
+			<div style="background-color: #f4f4f4; padding: 20px; text-align: center; border-radius: 5px; margin: 20px 0;">
+				<h1 style="margin: 0; letter-spacing: 5px; color: #2563eb;">%s</h1>
+			</div>
+			<p>If you didn't request this, you can safely ignore this email.</p>
+		</div>
+	`, code)
 
 	msg := []byte(subject + mime + body)
 
@@ -65,9 +60,7 @@ func SendPasswordResetEmail(toEmail string, token string) error {
 	smtpPort := "587"
 	auth := smtp.PlainAuth("", from, password, smtpHost)
 
-	// In a real app, this should point to your Next.js frontend route, e.g., http://localhost:3000/reset-password?token=
-	// We'll assume frontend runs on 3000
-	frontendURL := "http://localhost:3000"
+	frontendURL := "https://ai-pdf-assistant-frontend-ntha4y-ff493a-35-180-95-158.sslip.io"
 	resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, token)
 
 	subject := "Subject: Reset your password\n"

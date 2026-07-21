@@ -58,7 +58,7 @@ func main() {
 		{
 			auth.POST("/signup", controllers.Signup)
 			auth.POST("/login", controllers.Login)
-			auth.GET("/verify", controllers.VerifyEmail)
+			auth.POST("/verify", controllers.VerifyEmail)
 			auth.POST("/forgot-password", controllers.ForgotPassword)
 			auth.POST("/reset-password", controllers.ResetPassword)
 		}
@@ -69,6 +69,7 @@ func main() {
 			user.GET("/profile", controllers.GetProfile)
 			user.PUT("/profile", controllers.UpdateProfile)
 			user.PUT("/password", controllers.ChangePassword)
+			user.POST("/avatar", controllers.UploadAvatar)
 		}
 	}
 

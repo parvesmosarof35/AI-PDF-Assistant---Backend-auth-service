@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"net/http"
 	"time"
 
@@ -43,8 +45,8 @@ func Signup(c *gin.Context) {
 		return
 	}
 
-	// Generate verification token
-	verificationToken := uuid.New().String()
+	// Generate 6-digit verification code
+	verificationCode := fmt.Sprintf("%06d", rand.Intn(1000000))
 
 	// Create user
 	newUser := models.User{
@@ -52,7 +54,7 @@ func Signup(c *gin.Context) {
 		Email:             input.Email,
 		Password:          string(hashedPassword),
 		IsVerified:        false,
-		VerificationToken: verificationToken,
+		VerificationToken: verificationCode,
 		CreatedAt:         time.Now(),
 	}
 
@@ -62,22 +64,16 @@ func Signup(c *gin.Context) {
 		return
 	}
 
+	userID := result.InsertedID.(primitive.ObjectID).Hex()
+
 	// Send Verification Email asynchronously
 	go func() {
-		_ = utils.SendVerificationEmail(newUser.Email, verificationToken)
+		_ = utils.SendVerificationEmail(newUser.Email, verificationCode)
 	}()
 
-	// generate token
-	userID := result.InsertedID.(primitive.ObjectID).Hex()
-	token, err := utils.GenerateToken(userID, newUser.Email)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
-		return
-	}
-
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "User created successfully. Please check your email to verify your account.",
-		"token":   token,
+		"message": "User created successfully. Please check your email for the 6-digit verification code.",
+		"needs_verification": true,
 		"user": gin.H{
 			"id":          userID,
 			"name":        newUser.Name,
@@ -116,6 +112,15 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	if !user.IsVerified {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Please verify your email first",
+			"needs_verification": true,
+			"email": user.Email,
+		})
+		return
+	}
+
 	// Generate token
 	token, err := utils.GenerateToken(user.ID.Hex(), user.Email)
 	if err != nil {
@@ -137,9 +142,9 @@ func Login(c *gin.Context) {
 }
 
 func VerifyEmail(c *gin.Context) {
-	token := c.Query("token")
-	if token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Verification token is required"})
+	var input models.VerifyEmailInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -147,20 +152,33 @@ func VerifyEmail(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Update user where verification_token matches
+	// Find the user by email
+	var user models.User
+	err := userCollection.FindOne(ctx, bson.M{"email": input.Email}).Decode(&user)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
+		return
+	}
+
+	if user.IsVerified {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email is already verified"})
+		return
+	}
+
+	if user.VerificationToken != input.Code {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid verification code"})
+		return
+	}
+
+	// Update user
 	update := bson.M{
 		"$set": bson.M{"is_verified": true},
 		"$unset": bson.M{"verification_token": ""}, // Remove token after successful verification
 	}
 
-	result, err := userCollection.UpdateOne(ctx, bson.M{"verification_token": token}, update)
+	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, update)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-		return
-	}
-
-	if result.ModifiedCount == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired verification token"})
 		return
 	}
 

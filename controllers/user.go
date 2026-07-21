@@ -3,11 +3,14 @@ package controllers
 import (
 	"context"
 	"net/http"
+	"os"
 	"time"
 
 	"auth-service/config"
 	"auth-service/models"
 
+	"github.com/cloudinary/cloudinary-go/v2"
+	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -156,4 +159,67 @@ func ChangePassword(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Password changed successfully"})
+}
+
+func UploadAvatar(c *gin.Context) {
+	userIDStr, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	objID, err := primitive.ObjectIDFromHex(userIDStr.(string))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	file, _, err := c.Request.FormFile("avatar")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to get avatar from request"})
+		return
+	}
+	defer file.Close()
+
+	// Initialize Cloudinary
+	cld, err := cloudinary.NewFromParams(
+		os.Getenv("CLOUDINARY_CLOUD_NAME"),
+		os.Getenv("CLOUDINARY_API_KEY"),
+		os.Getenv("CLOUDINARY_API_SECRET"),
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize Cloudinary"})
+		return
+	}
+
+	// Upload to Cloudinary
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	uploadResult, err := cld.Upload.Upload(ctx, file, uploader.UploadParams{
+		Folder: "avatars",
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload to Cloudinary"})
+		return
+	}
+
+	// Update user in DB
+	userCollection := config.DB.Collection("users")
+	
+	update := bson.M{"$set": bson.M{"avatar_url": uploadResult.SecureURL}}
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	
+	var updatedUser models.User
+	err = userCollection.FindOneAndUpdate(ctx, bson.M{"_id": objID}, update, opts).Decode(&updatedUser)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save avatar URL to database"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Avatar uploaded successfully",
+		"avatar_url": uploadResult.SecureURL,
+		"user": updatedUser,
+	})
 }
